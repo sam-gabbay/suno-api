@@ -110,6 +110,66 @@ newer model works just because the wrapper starts.
 The upstream docs UI has not been modified to supply the local API bearer key;
 use the CLI helpers or an authenticated HTTP client for this prototype.
 
+## Create an album with Codex
+
+From this repository in Terminal:
+
+```sh
+npm run album
+# Or describe a different album:
+npm run album -- "10 upbeat Afrobeats songs in English, mixed female and male singers"
+```
+
+This opens your installed Codex CLI with **gpt-6-astra** explicitly selected and
+the repository's `$create-album` skill. It uses your Codex login. Astra writes the
+album concept, name, song titles, complete lyrics, individual Suno prompts, and
+cover art direction. The built-in image tool renders the actual cover. The
+default is ten English Afrobeats songs with five female and five male leads.
+
+In Codex already open on this repository, you can also say:
+
+```text
+$create-album Create a 10-song upbeat Afrobeats album with Astra 6,
+mixed female and male singers, full lyrics, Suno prompts, and cover artwork.
+```
+
+The skill is in `.agents/skills/create-album`, a repository discovery location
+described in the [official Codex skills documentation](https://developers.openai.com/codex/skills).
+If a running session does not show it yet, reopen the session. `CODEX_BIN` can
+override the CLI executable path; the launcher does not substitute another model
+if Astra is unavailable.
+
+The default creates a creative package, without sending music-generation requests.
+To request music as well, explicitly add `--music`:
+
+```sh
+npm run album -- --music "10 upbeat Afrobeats songs, mixed female and male singers"
+```
+
+This asks Codex to carry the album through the local Suno API, saving clip IDs and
+resuming existing jobs after interruptions. It is an agent workflow, not a
+background scheduler. Music generation and first download unlocks consume Suno
+allowance. No additional credit/download packs are purchased. The ten-song music
+workflow has not yet been run; the underlying single-request generation and
+download flow was verified earlier.
+
+Each album goes to ignored `output/albums/<album-slug>/` with:
+
+- `ALBUM.md`: track list, vocal directions, and the complete lyric book.
+- `album.json` and `suno-prompts.json`: creative metadata and ready-to-submit
+  `/api/custom_generate` request bodies.
+- `tracks/`: individual lyric sheets and Suno request JSONs.
+- `cover.png` and `artwork-prompt.txt`: cover and its exact creative brief.
+- `package-status.json`: separates creative, artwork, and music completion.
+
+The first package is `output/albums/room-for-the-morning/`. Its ten original songs
+and cover are finished; album audio has not been generated.
+
+`npm run album -- --dry-run` prints the launch arguments without starting Codex.
+`npm run album:prepare -- <draft.json> --artwork <cover.png>` validates and exports
+an existing creative draft without calling any model or Suno API. It preserves
+existing packages; use `--out <new-directory>` for another version.
+
 ## Local changes
 
 - Bind startup to loopback port 3210 and require a local bearer token.
@@ -123,6 +183,7 @@ use the CLI helpers or an authenticated HTTP client for this prototype.
 - Normalize browser-copied Cookie headers, update CAPTCHA selectors/interception,
   and discard cached clients from an earlier development hot reload.
 - Add authorized download conversion and resume verification of existing clips.
+- Add the Astra album command, Codex skill, and validated creative-package exporter.
 
 ## Checks
 

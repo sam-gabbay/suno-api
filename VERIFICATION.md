@@ -6,8 +6,9 @@ Environment: macOS, Node 25.1.0, Next.js 14.2.35.
 
 - Production build, including TypeScript validation and all route compilation.
 - ESLint without warnings or errors.
-- Nine tests covering credential redaction, Cookie-header normalization, Turnstile
-  render preservation, and download validation/authorization/polling failures.
+- Twelve tests covering credential redaction, Cookie-header normalization,
+  Turnstile render preservation, download validation/authorization/polling failures,
+  and album export/validation/launcher behavior.
 - Running server listens only on `127.0.0.1:3210`.
 - Unauthenticated health, generation, download, and chat requests return HTTP 401.
 - An incorrect bearer key and a middleware-subrequest bypass attempt return 401.
@@ -39,3 +40,22 @@ Environment: macOS, Node 25.1.0, Next.js 14.2.35.
 
 Earlier failed attempts stopped at CAPTCHA or download handling. Saved clip IDs
 were reused to complete download verification without another music submission.
+
+## Album creative workflow
+
+- `gpt-6-astra` created **Room for the Morning**: ten complete English lyric sets,
+  ten unique titles and Suno styles, five female leads and five male leads, and
+  a shared album concept and art direction.
+- The built-in image tool rendered and saved the square 1254 × 1254 PNG cover.
+  Its exact title and composition were visually inspected.
+- The exporter validated every track and saved the lyric book, metadata, cover,
+  and ten individual `/api/custom_generate` request bodies under
+  `output/albums/room-for-the-morning/`. Style prompts are below 200 characters;
+  complete lyric sets are below 3,000 characters with repeated choruses written out.
+- The repo-local `$create-album` skill passes its skill validator. The CLI launcher
+  resolves the installed Codex executable and pins `gpt-6-astra`, which is present
+  in the local model catalog. Its dry-run invocation was checked.
+- Export tests verify lyrics/style field mapping, vocal assignment, explicit
+  music mode, invalid-input rejection, and preservation of an existing package.
+- No music-generation or download-unlock requests were sent for this album.
+  Album vocals and musical quality remain unverified until audio is generated.

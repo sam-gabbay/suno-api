@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create an Album"
+  short_description: "Album titles, lyrics, Suno prompts, and cover artwork"
+  default_prompt: "Use $create-album to create a 10-song upbeat Afrobeats album with Astra 6, mixed female and male leads, full lyrics, Suno prompts, and cover artwork."

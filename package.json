@@ -17,6 +17,8 @@
     "doctor": "node scripts/doctor.mjs",
     "check:local": "node scripts/check-local.mjs",
     "smoke": "node scripts/smoke.mjs",
+    "album": "node scripts/create-album.mjs",
+    "album:prepare": "node scripts/prepare-album.mjs",
     "test": "node --experimental-strip-types --test tests/*.test.mjs"
   },
   "engines": { "node": ">=22.14.0" },
