@@ -1,3 +1,7 @@
+> **Local fork:** Follow [LOCAL_SETUP.md](./LOCAL_SETUP.md) for the authenticated
+> API on port 3210, private credential setup, and the generation/download test.
+> See [VERIFICATION.md](./VERIFICATION.md) for what has actually been tested.
+
 <div align="center">
   <h1 align="center">
       Suno AI API

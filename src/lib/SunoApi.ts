@@ -11,6 +11,7 @@ import { BrowserContext, Page, Locator, chromium, firefox } from 'rebrowser-play
 import { createCursor, Cursor } from 'ghost-cursor-playwright';
 import { promises as fs } from 'fs';
 import path from 'node:path';
+import { upstreamError } from './upstream-error';
 
 // sunoApi instance caching
 const globalForSunoApi = global as unknown as { sunoApiCache?: Map<string, SunoApi> };
@@ -18,7 +19,7 @@ const cache = globalForSunoApi.sunoApiCache || new Map<string, SunoApi>();
 globalForSunoApi.sunoApiCache = cache;
 
 const logger = pino();
-export const DEFAULT_MODEL = 'chirp-v3-5';
+export const DEFAULT_MODEL = process.env.SUNO_MODEL || 'chirp-v3-5';
 
 export interface AudioInfo {
   id: string; // Unique identifier for the audio
@@ -87,6 +88,7 @@ class SunoApi {
     this.cookies = cookie.parse(cookies);
     this.deviceId = this.cookies.ajs_anonymous_id || randomUUID();
     this.client = axios.create({
+      timeout: 30000,
       withCredentials: true,
       headers: {
         'Affiliate-Id': 'undefined',
@@ -117,7 +119,7 @@ class SunoApi {
         }
       }
       return resp;
-    })
+    }, (error: unknown) => Promise.reject(upstreamError(error)));
   }
 
   public async init(): Promise<SunoApi> {
@@ -307,6 +309,10 @@ class SunoApi {
   public async getCaptcha(): Promise<string|null> {
     if (!await this.captchaRequired())
       return null;
+
+    if (!process.env.TWOCAPTCHA_KEY?.trim()) {
+      throw new Error('Suno requires a CAPTCHA. Configure TWOCAPTCHA_KEY in .env.local before retrying.');
+    }
 
     logger.info('CAPTCHA required. Launching browser...')
     const browser = await this.launchBrowser();
@@ -576,23 +582,7 @@ class SunoApi {
     } else {
       payload.gpt_description_prompt = prompt;
     }
-    logger.info(
-      'generateSongs payload:\n' +
-        JSON.stringify(
-          {
-            prompt: prompt,
-            isCustom: isCustom,
-            tags: tags,
-            title: title,
-            make_instrumental: make_instrumental,
-            wait_audio: wait_audio,
-            negative_tags: negative_tags,
-            payload: payload
-          },
-          null,
-          2
-        )
-    );
+    logger.info({ model: payload.mv, isCustom, make_instrumental }, 'Submitting generation');
     const response = await this.client.post(
       `${SunoApi.BASE_URL}/api/generate/v2/`,
       payload,
