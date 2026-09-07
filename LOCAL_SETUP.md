@@ -4,9 +4,10 @@ Fork: https://github.com/sam-gabbay/suno-api
 
 Upstream: https://github.com/gcui-art/suno-api, starting commit `a2e6a82`.
 
-This is an unofficial wrapper around Suno's web service. Local build success does
-not establish that Suno authentication, generation, or downloads currently work.
-The complete live check is `npm run smoke`.
+This is an unofficial wrapper around Suno's web service. On September 7, 2026,
+the local setup generated two v3.5 songs and downloaded both as valid four-minute
+MP3s. See `VERIFICATION.md` for evidence and limits. The complete live check is
+`npm run smoke`; it consumes account allowance.
 
 ## Start
 
@@ -55,8 +56,9 @@ node node_modules/rebrowser-playwright-core/cli.js install chromium
 
 Restart the server afterward. Installing with `--ignore-scripts` skips the large
 Electron download and automatic browser downloads. Only the explicit Chromium
-installation above is needed for the CAPTCHA path. CAPTCHA execution has not
-been verified against Suno's current interface.
+installation above is needed for the CAPTCHA path. The current Song Description /
+Create song flow and hCaptcha solver completed the live test. A Turnstile fallback
+is implemented but has not completed a live generation test.
 
 ## Generate and verify audio
 
@@ -67,14 +69,39 @@ npm run smoke -- A gentle jazz piano instrumental with upright bass
 ```
 
 This submits **one generation request**, which may produce two clips and consume
-Suno credits, waits for `complete` status, downloads every returned clip, and
+Suno credits, waits for `complete` status, unlocks and downloads every returned clip, and
 requires `ffprobe` metadata plus a full `ffmpeg` decode before declaring success.
 Both commands must be installed before the test can submit anything.
+The first download unlock also uses Suno's separate download allowance. The
+helper does not purchase additional downloads.
 
 Results and a report go to ignored `output/<timestamp>/`. Clip IDs are saved as
 soon as generation is accepted. A failed or timed-out request is never
 automatically resubmitted. Check the saved IDs and your Suno workspace before
-manually running another paid generation.
+manually running another paid generation. Resume saved jobs without generating
+again:
+
+```sh
+npm run smoke -- --resume output/<timestamp>/report.json
+```
+
+Resume writes a new output folder and preserves the original report. Already
+unlocked songs can be downloaded again without another unlock charge.
+
+## Download API
+
+After `/api/get?ids=<clip_id>` reports `complete`, call authenticated
+`POST /api/download` with:
+
+```json
+{"clip_id":"<clip UUID>","format":"mp3"}
+```
+
+Supported formats are `mp3` (default) and `m4a`. The API authorizes the download,
+waits for conversion, and returns `download_url`, `already_unlocked`, and
+`credit_deducted`. Fetch that temporary HTTPS URL promptly without sending the
+local bearer key to it. The feed's `audio_url` can return 403 and is not proof of
+a downloadable file. If conversion times out, retry the same clip ID.
 
 Upstream's default model is `chirp-v3-5`. `SUNO_MODEL` in `.env.local` can override
 it after confirming a supported model ID with your account. Do not assume a
@@ -93,6 +120,9 @@ use the CLI helpers or an authenticated HTTP client for this prototype.
 - Update Next.js and its lint package to 14.2.35.
 - Add one-submission generation/download verification with no false success on
   HTML, encrypted data, incomplete jobs, or undecodable audio.
+- Normalize browser-copied Cookie headers, update CAPTCHA selectors/interception,
+  and discard cached clients from an earlier development hot reload.
+- Add authorized download conversion and resume verification of existing clips.
 
 ## Checks
 

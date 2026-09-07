@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { normalizeCookieHeader } from '../src/lib/cookie-header.mjs';
 
 const file = fileURLToPath(new URL('../.env.local', import.meta.url));
 const values = existsSync(file) ? parseEnv(readFileSync(file, 'utf8')) : {};
@@ -18,17 +19,26 @@ if (option) {
     process.exit(1);
   }
   if (option === '--cookie-from-clipboard') {
-    if (!/(?:^|;\s*)__client=[^;]+/.test(secret)) {
-      console.error('Copy the Cookie header from an auth.suno.com request containing __client. Nothing saved.');
+    try {
+      values.SUNO_COOKIE = normalizeCookieHeader(secret);
+    } catch (error) {
+      console.error(`${error.message} Nothing saved.`);
       process.exit(1);
     }
-    values.SUNO_COOKIE = secret;
   } else {
     if (!/^[a-fA-F0-9]{32}$/.test(secret)) {
       console.error('Clipboard does not look like a 2Captcha API key. Nothing saved.');
       process.exit(1);
     }
     values.TWOCAPTCHA_KEY = secret;
+  }
+}
+if (values.SUNO_COOKIE) {
+  try {
+    values.SUNO_COOKIE = normalizeCookieHeader(values.SUNO_COOKIE);
+  } catch (error) {
+    console.error(`${error.message} Nothing saved.`);
+    process.exit(1);
   }
 }
 values.SUNO_API_KEY ||= randomBytes(32).toString('hex');

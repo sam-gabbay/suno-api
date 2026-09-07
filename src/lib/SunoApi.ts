@@ -2,7 +2,7 @@ import axios, { AxiosInstance } from 'axios';
 import UserAgent from 'user-agents';
 import pino from 'pino';
 import yn from 'yn';
-import { isPage, sleep, waitForRequests } from '@/lib/utils';
+import { isPage, sleep } from '@/lib/utils';
 import * as cookie from 'cookie';
 import { randomUUID } from 'node:crypto';
 import { Solver } from '@2captcha/captcha-solver';
@@ -12,6 +12,9 @@ import { createCursor, Cursor } from 'ghost-cursor-playwright';
 import { promises as fs } from 'fs';
 import path from 'node:path';
 import { upstreamError } from './upstream-error';
+import { normalizeCookieHeader } from './cookie-header.mjs';
+import { installTurnstileCapture } from './turnstile-capture.mjs';
+import { prepareDownload, DownloadFormat } from './download';
 
 // sunoApi instance caching
 const globalForSunoApi = global as unknown as { sunoApiCache?: Map<string, SunoApi> };
@@ -76,6 +79,7 @@ class SunoApi {
   private readonly client: AxiosInstance;
   private sid?: string;
   private currentToken?: string;
+  private tokenProvider?: string;
   private deviceId?: string;
   private userAgent?: string;
   private cookies: Record<string, string | undefined>;
@@ -85,7 +89,7 @@ class SunoApi {
 
   constructor(cookies: string) {
     this.userAgent = new UserAgent(/Macintosh/).random().toString(); // Usually Mac systems get less amount of CAPTCHAs
-    this.cookies = cookie.parse(cookies);
+    this.cookies = cookie.parse(normalizeCookieHeader(cookies));
     this.deviceId = this.cookies.ajs_anonymous_id || randomUUID();
     this.client = axios.create({
       timeout: 30000,
@@ -304,134 +308,161 @@ class SunoApi {
 
   /**
    * Checks for CAPTCHA verification and solves the CAPTCHA if needed
-   * @returns {string|null} hCaptcha token. If no verification is required, returns null
+   * @returns {string|null} CAPTCHA token. If no verification is required, returns null
    */
   public async getCaptcha(): Promise<string|null> {
-    if (!await this.captchaRequired())
-      return null;
-
+    this.tokenProvider = undefined;
+    if (!await this.captchaRequired()) return null;
     if (!process.env.TWOCAPTCHA_KEY?.trim()) {
       throw new Error('Suno requires a CAPTCHA. Configure TWOCAPTCHA_KEY in .env.local before retrying.');
     }
 
-    logger.info('CAPTCHA required. Launching browser...')
-    const browser = await this.launchBrowser();
-    const page = await browser.newPage();
-    await page.goto('https://suno.com/create', { referer: 'https://www.google.com/', waitUntil: 'domcontentloaded', timeout: 0 });
-
-    logger.info('Waiting for Suno interface to load');
-    // await page.locator('.react-aria-GridList').waitFor({ timeout: 60000 });
-    await page.waitForResponse('**/api/project/**\\?**', { timeout: 60000 }); // wait for song list API call
-
-    if (this.ghostCursorEnabled)
-      this.cursor = await createCursor(page);
-    
-    logger.info('Triggering the CAPTCHA');
-    try {
-      await page.getByLabel('Close').click({ timeout: 2000 }); // close all popups
-      // await this.click(page, { x: 318, y: 13 });
-    } catch(e) {}
-
-    const textarea = page.locator('.custom-textarea');
-    await this.click(textarea);
-    await textarea.pressSequentially('Lorem ipsum', { delay: 80 });
-
-    const button = page.locator('button[aria-label="Create"]').locator('div.flex');
-    this.click(button);
-
+    logger.info('CAPTCHA required. Launching browser...');
+    const context = await this.launchBrowser();
+    const page = await context.newPage();
     const controller = new AbortController();
-    new Promise<void>(async (resolve, reject) => {
-      const frame = page.frameLocator('iframe[title*="hCaptcha"]');
-      const challenge = frame.locator('.challenge-container');
-      try {
-        let wait = true;
-        while (true) {
-          if (wait)
-            await waitForRequests(page, controller.signal);
-          const drag = (await challenge.locator('.prompt-text').first().innerText()).toLowerCase().includes('drag');
-          let captcha: any;
-          for (let j = 0; j < 3; j++) { // try several times because sometimes 2Captcha could return an error
-            try {
-              logger.info('Sending the CAPTCHA to 2Captcha');
-              const payload: paramsCoordinates = {
-                body: (await challenge.screenshot({ timeout: 5000 })).toString('base64'),
-                lang: process.env.BROWSER_LOCALE
-              };
-              if (drag) {
-                // Say to the worker that he needs to click
-                payload.textinstructions = 'CLICK on the shapes at their edge or center as shown above—please be precise!';
-                payload.imginstructions = (await fs.readFile(path.join(process.cwd(), 'public', 'drag-instructions.jpg'))).toString('base64');
-              }
-              captcha = await this.solver.coordinates(payload);
-              break;
-            } catch(err: any) {
-              logger.info(err.message);
-              if (j != 2)
-                logger.info('Retrying...');
-              else
-                throw err;
-            }
-          } 
-          if (drag) {
-            const challengeBox = await challenge.boundingBox();
-            if (challengeBox == null)
-              throw new Error('.challenge-container boundingBox is null!');
-            if (captcha.data.length % 2) {
-              logger.info('Solution does not have even amount of points required for dragging. Requesting new solution...');
-              this.solver.badReport(captcha.id);
-              wait = false;
-              continue;
-            }
-            for (let i = 0; i < captcha.data.length; i += 2) {
-              const data1 = captcha.data[i];
-              const data2 = captcha.data[i+1];
-              logger.info(JSON.stringify(data1) + JSON.stringify(data2));
-              await page.mouse.move(challengeBox.x + +data1.x, challengeBox.y + +data1.y);
-              await page.mouse.down();
-              await sleep(1.1); // wait for the piece to be 'unlocked'
-              await page.mouse.move(challengeBox.x + +data2.x, challengeBox.y + +data2.y, { steps: 30 });
-              await page.mouse.up();
-            }
-            wait = true;
-          } else {
-            for (const data of captcha.data) {
-              logger.info(data);
-              await this.click(challenge, { x: +data.x, y: +data.y });
-            };
-          }
-          this.click(frame.locator('.button-submit')).catch(e => {
-            if (e.message.includes('viewport')) // when hCaptcha window has been closed due to inactivity,
-              this.click(button); // click the Create button again to trigger the CAPTCHA
-            else
-              throw e;
-          });
-        }
-      } catch(e: any) {
-        if (e.message.includes('been closed') // catch error when closing the browser
-          || e.message == 'AbortError') // catch error when waitForRequests is aborted
-          resolve();
-        else
-          reject(e);
-      }
-    }).catch(e => {
-      browser.browser()?.close();
-      throw e;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let resolveToken!: (value: string | null) => void;
+    let rejectToken!: (error: Error) => void;
+    const token = new Promise<string | null>((resolve, reject) => {
+      resolveToken = resolve;
+      rejectToken = reject;
     });
-    return (new Promise((resolve, reject) => {
-      page.route('**/api/generate/v2/**', async (route: any) => {
+    // Attach a handler now, even if navigation fails before the race starts.
+    void token.catch(() => {});
+    try {
+      await page.addInitScript(installTurnstileCapture);
+      // Install before clicking Create. The browser is used only for the
+      // challenge: it must never submit a second, unintended generation.
+      await page.route('**/api/generate/**', async (route) => {
+        const request = route.request();
+        if (request.method() !== 'POST') return route.continue();
+        await route.abort();
         try {
-          logger.info('hCaptcha token received. Closing browser');
-          route.abort();
-          browser.browser()?.close();
+          const body = request.postDataJSON();
+          this.tokenProvider = typeof body.token_provider === 'string' ? body.token_provider : undefined;
+          const authorization = request.headers().authorization;
+          if (authorization?.startsWith('Bearer ')) this.currentToken = authorization.slice(7);
+          logger.info({ path: new URL(request.url()).pathname, model: body.mv, hasToken: Boolean(body.token), tokenType: typeof body.token, fields: Object.keys(body) }, 'Captured browser generation; request was not submitted');
+          resolveToken(typeof body.token === 'string' ? body.token : null);
           controller.abort();
-          const request = route.request();
-          this.currentToken = request.headers().authorization.split('Bearer ').pop();
-          resolve(request.postDataJSON().token);
-        } catch(err) {
-          reject(err);
+        } catch {
+          rejectToken(new Error('Unable to read the CAPTCHA result from Suno.'));
         }
       });
-    }));
+      timer = setTimeout(() => {
+        controller.abort();
+        rejectToken(new Error('CAPTCHA did not finish within 150 seconds. No browser generation was submitted.'));
+        void context.browser()?.close();
+      }, 150000);
+      await page.goto('https://suno.com/create', { waitUntil: 'domcontentloaded', timeout: 45000 });
+      if (this.ghostCursorEnabled) this.cursor = await createCursor(page);
+
+      // Current Suno uses a Song Description section and a Create song button.
+      // Its placeholder changes on every load, so avoid placeholder text/classes.
+      const description = page.getByText('Song Description', { exact: true })
+        .locator('xpath=ancestor::*[.//textarea][1]').locator('textarea').first();
+      await description.fill('A calm instrumental piano piece.', { timeout: 45000 });
+      const create = page.getByRole('button', { name: 'Create song', exact: true });
+      await create.click({ timeout: 15000 });
+
+      const solve = async (): Promise<string | null> => {
+        const kind = await page.waitForFunction(() => {
+          if ((window as any).__sunoTurnstile?.sitekey) return 'turnstile';
+          if (document.querySelector('iframe[title*="hCaptcha"]')) return 'hcaptcha';
+          return false;
+        }, undefined, { timeout: 45000 }).then((handle) => handle.jsonValue());
+        if (kind === 'turnstile') {
+          const parameters = await page.evaluate(() => {
+            const challenge = (window as any).__sunoTurnstile;
+            return { sitekey: challenge.sitekey, action: challenge.action, data: challenge.data, pagedata: challenge.pagedata };
+          });
+          logger.info('Sending Turnstile challenge to 2Captcha');
+          let solution;
+          try {
+            solution = await this.solver.cloudflareTurnstile({ ...parameters, pageurl: 'https://suno.com/create' });
+          } catch {
+            throw new Error('2Captcha could not solve the Turnstile challenge.');
+          }
+          if (!controller.signal.aborted) {
+            await page.evaluate((value) => {
+              const callback = (window as any).__sunoTurnstile?.callback;
+              if (typeof callback !== 'function') throw new Error('Suno Turnstile callback is unavailable.');
+              callback(value);
+            }, solution.data);
+          }
+          // The callback should release the intercepted browser generation.
+          return await token;
+        }
+        const frame = page.frameLocator('iframe[title*="hCaptcha"]');
+        const challenge = frame.locator('.challenge-container');
+        for (let round = 0; round < 5 && !controller.signal.aborted; round++) {
+          await challenge.waitFor({ state: 'visible', timeout: 60000 });
+          await page.waitForTimeout(1200);
+          if (controller.signal.aborted) break;
+          const drag = (await challenge.locator('.prompt-text').first().innerText()).toLowerCase().includes('drag');
+          const payload: paramsCoordinates = {
+            body: (await challenge.screenshot({ timeout: 5000 })).toString('base64'),
+            lang: process.env.BROWSER_LOCALE
+          };
+          if (drag) {
+            payload.textinstructions = 'CLICK on the shapes at their edge or center as shown above—please be precise!';
+            payload.imginstructions = (await fs.readFile(path.join(process.cwd(), 'public', 'drag-instructions.jpg'))).toString('base64');
+          }
+          logger.info({ round: round + 1 }, 'Sending challenge to 2Captcha');
+          let answer;
+          try {
+            answer = await this.solver.coordinates(payload);
+          } catch {
+            throw new Error('2Captcha could not solve the challenge. Check the account balance and try again.');
+          }
+          if (controller.signal.aborted) break;
+          const coordinates: unknown = answer.data;
+          if (!Array.isArray(coordinates) || coordinates.length === 0) {
+            throw new Error('2Captcha returned no usable click coordinates.');
+          }
+          const points = coordinates.map((point) => ({ x: Number(point.x), y: Number(point.y) }));
+          const box = await challenge.boundingBox();
+          if (!box || points.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y) ||
+            point.x < 0 || point.y < 0 || point.x >= box.width || point.y >= box.height)) {
+            throw new Error('2Captcha returned coordinates outside the challenge.');
+          }
+          if (drag) {
+            if (points.length % 2 !== 0) {
+              await this.solver.badReport(answer.id).catch(() => {});
+              continue;
+            }
+            for (let i = 0; i < points.length; i += 2) {
+              const from = points[i];
+              const to = points[i + 1];
+              await page.mouse.move(box.x + +from.x, box.y + +from.y);
+              await page.mouse.down();
+              await sleep(1.1);
+              await page.mouse.move(box.x + +to.x, box.y + +to.y, { steps: 30 });
+              await page.mouse.up();
+            }
+          } else {
+            for (const point of points) {
+              await this.click(challenge, { x: +point.x, y: +point.y });
+            }
+          }
+          await frame.locator('.button-submit').click({ timeout: 10000 });
+          await page.waitForTimeout(1500);
+        }
+        throw new Error('CAPTCHA did not complete within the allowed challenge rounds.');
+      };
+      return await Promise.race([token, solve()]);
+    } catch (error) {
+      if (!page.isClosed()) {
+        await fs.mkdir(path.join(process.cwd(), 'output'), { recursive: true });
+        await page.screenshot({ path: path.join(process.cwd(), 'output', 'captcha-last-failure.png') }).catch(() => {});
+      }
+      throw error;
+    } finally {
+      controller.abort();
+      if (timer) clearTimeout(timer);
+      await context.browser()?.close();
+    }
   }
 
   /**
@@ -572,7 +603,8 @@ class SunoApi {
       continue_at: continue_at,
       continue_clip_id: continue_clip_id,
       task: task,
-      token: await this.getCaptcha()
+      token: await this.getCaptcha(),
+      token_provider: this.tokenProvider
     };
     if (isCustom) {
       payload.tags = tags;
@@ -820,6 +852,11 @@ class SunoApi {
     };
   }
 
+  public async download(clipId: string, format: DownloadFormat = 'mp3') {
+    await this.keepAlive(false);
+    return prepareDownload(this.client, clipId, format);
+  }
+
   public async getPersonaPaginated(personaId: string, page: number = 1): Promise<PersonaResponse> {
     await this.keepAlive(false);
     
@@ -848,7 +885,8 @@ export const sunoApi = async (cookie?: string) => {
 
   // Check if the instance for this cookie already exists in the cache
   const cachedInstance = cache.get(resolvedCookie);
-  if (cachedInstance)
+  // Hot reload creates a new class; do not reuse clients with old methods.
+  if (cachedInstance && cachedInstance instanceof SunoApi)
     return cachedInstance;
 
   // If not, create a new instance and initialize it
