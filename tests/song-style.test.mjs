@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { SAMPLE_RATE, estimateTempo, chroma, estimateKey, describe, analyseAudio } from '../scripts/style-analysis.mjs';
 import { parseSunoInput, resolveShortLink, sunoRecipe, sameStyleRequest, isSunoAudioUrl } from '../scripts/suno-style.mjs';
-import { inspect, renderReport, findDownloaded } from '../scripts/inspect-song.mjs';
+import { inspect, renderReport, findDownloaded, parseYouTube, videoFacts } from '../scripts/inspect-song.mjs';
 
 const ID = '0d7fdabe-c2ca-4e13-9456-d32a21cd571a';
 
@@ -148,6 +148,23 @@ test('Suno inspection uses a downloaded copy when Suno will not stream it', asyn
   }
 });
 
+test('recognises YouTube links and keeps the details that describe a song', () => {
+  const watch = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  for (const link of ['https://youtu.be/dQw4w9WgXcQ?si=x', 'https://m.youtube.com/watch?v=dQw4w9WgXcQ&t=10',
+    'https://music.youtube.com/watch?v=dQw4w9WgXcQ&list=RD', 'https://www.youtube.com/shorts/dQw4w9WgXcQ']) {
+    assert.equal(parseYouTube(link), watch, link);
+  }
+  assert.equal(parseYouTube('https://www.youtube.com/watch?v=short'), null);
+  assert.equal(parseYouTube('https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ'), null);
+  assert.equal(parseYouTube('dQw4w9WgXcQ'), null);
+  const facts = videoFacts({ title: 'Song (Official Video)', uploader: 'Band', artist: 'Band', track: 'Song', tags: ['pop', 3], duration: 212.6 });
+  assert.equal(facts.channel, 'Band');
+  assert.deepEqual(facts.tags, ['pop']);
+  assert.equal(facts.duration_seconds, 213);
+  const report = renderReport({ source: watch, video: facts });
+  assert.match(report, /# How "Song" is made[\s\S]*Band, "Song"[\s\S]*Genre and subgenre/);
+});
+
 test('rejects inputs it cannot inspect', async () => {
-  await assert.rejects(inspect('https://www.youtube.com/watch?v=abc'), /not an audio file, a Suno link/);
+  await assert.rejects(inspect('https://open.spotify.com/track/abc'), /not an audio file, a YouTube or Suno link/);
 });

@@ -1,6 +1,6 @@
 ---
 name: match-style
-description: Inspect a song (a Suno link or clip ID, or an audio file) and write a Suno style prompt that recreates its style. Use for requests like "make something that sounds like this", "what prompt made this song", or "match the style of".
+description: Inspect a song (a Suno link or clip ID, a YouTube link, or an audio file) and write a Suno style prompt that recreates its style. Use for requests like "make something that sounds like this", "what prompt made this song", or "match the style of".
 ---
 
 # Match a song's style
@@ -11,11 +11,12 @@ guide is `SONG_STYLE.md`; this is the agent's version.
 ## 1. Inspect
 
 ```sh
-npm run inspect -- <suno link | clip ID | path/to/audio>
+npm run inspect -- <suno link | clip ID | YouTube link | path/to/audio>
 ```
 
 A Suno song needs the local API running (`npm run dev`, see `LOCAL_SETUP.md`); an
-audio file does not. Reading a clip is free: it never generates or unlocks a
+audio file or YouTube link does not (YouTube needs `yt-dlp`). For YouTube, the
+report's title, channel and tags usually name the song: use that for step 2. Reading a clip is free: it never generates or unlocks a
 download. The report and `style.json` are saved under `output/inspect/`.
 
 ## 2. Write the prompt

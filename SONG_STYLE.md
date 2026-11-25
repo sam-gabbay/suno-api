@@ -5,7 +5,8 @@ npm run inspect -- <song>
 ```
 
 `<song>` can be a Suno link (`https://suno.com/song/...` or a `suno.com/s/...`
-share link), a Suno clip ID, or any audio file on this Mac. The report prints in
+share link), a Suno clip ID, a YouTube or YouTube Music link, or any audio file
+on this Mac. The report prints in
 the terminal and is saved with a `style.json` under `output/inspect/`.
 
 ## A song made on Suno
@@ -27,7 +28,11 @@ from it to keep the voice, or use Cover or Extend.
 
 ## Any other song
 
-Give it an audio file you have (an MP3, WAV, M4A and so on). It measures:
+Give it a YouTube link or an audio file you have (an MP3, WAV, M4A and so on).
+For YouTube it uses `yt-dlp` (`brew install yt-dlp`, already on the MacBook Pro)
+to fetch the audio to a temporary folder, measures it, deletes it, and keeps the
+title, channel and tags in the report. For Spotify or Apple Music songs, use the
+song's YouTube link. It measures:
 
 - tempo, with the other readings to try if it feels half or double speed;
 - key, left out of the prompt when the reading is uncertain;
@@ -48,4 +53,6 @@ tempo and key: tempo was right on 77% of drum loops, and most of the misses
 were at half or double speed; key was right on 57% of three-loop mixes (66%
 when the report is confident enough to keep the key). On Suno's own songs the
 tempo came within 5 BPM of the requested one in 17 of 20. Treat key as a
-hint, and Suno does not reliably follow a requested key anyway.
+hint, and Suno does not reliably follow a requested key anyway. On "Never Gonna
+Give You Up" from YouTube it read 114 BPM in A-flat major; the published figures
+are about 113 BPM in A-flat major.
