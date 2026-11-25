@@ -19,6 +19,7 @@
     "smoke": "node scripts/smoke.mjs",
     "album": "node scripts/create-album.mjs",
     "album:prepare": "node scripts/prepare-album.mjs",
+    "inspect": "node scripts/inspect-song.mjs",
     "test": "node --experimental-strip-types --test tests/*.test.mjs"
   },
   "engines": { "node": ">=22.14.0" },

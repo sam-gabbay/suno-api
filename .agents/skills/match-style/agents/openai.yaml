@@ -1,0 +1,4 @@
+interface:
+  display_name: "Match a Song's Style"
+  short_description: "Inspect a song and write a Suno prompt in the same style"
+  default_prompt: "Use $match-style to inspect this song and write a Suno style prompt that sounds like it."
